@@ -1,15 +1,10 @@
 -module(mad).
+-copyright('Sina Samavati').
+-export([main/1,'get-deps'/3,compile/3,'compile-app'/3,'compile-deps'/3]).
 
--export([main/1]).
--export(['fetch-deps'/3]).
--export([compile/3]).
--export(['compile-app'/3]).
--export(['compile-deps'/3]).
-
-
-main([]) ->
-    help();
+main([]) -> help();
 main(Args) ->
+
     {Opts, Params} = case getopt:parse(option_spec_list(), Args) of
                          {ok, {Opts1, Params1}} ->
                              {Opts1, [list_to_atom(E) || E <- Params1]};
@@ -25,9 +20,8 @@ main(Args) ->
     Conf = mad_utils:consult(ConfigFileAbs),
     Conf1 = mad_utils:script(ConfigFileAbs, Conf),
 
-    %% TODO: deps_dir might be a list of directories, add them all to code path
-    DepsDir = filename:join([hd(mad_utils:get_value(deps_dir, Conf1, ["deps"])),
-                             "*", "ebin"]),
+    %% rebar should create deps dir in deps_dir only, this is not a list
+    DepsDir = filename:join([mad_utils:get_value(deps_dir, Conf1, ["deps"]),"*","ebin"]),
     Paths = ["ebin"|filelib:wildcard(DepsDir)],
     code:add_paths(Paths),
 
@@ -39,14 +33,17 @@ main(Args) ->
     lists:foreach(Fun, Params).
 
 %% fetch dependencies
-'fetch-deps'(Cwd, ConfigFile, Conf) ->
+'get-deps'(Cwd, ConfigFile, Conf) ->
     case get_value(deps, Conf, []) of
-        [] ->
-            ok;
+        [] -> ok;
         Deps ->
-            file:make_dir(mad_deps:repos_path()),
-            file:make_dir("deps"),
-            mad_deps:fetch(Cwd, ConfigFile, Deps)
+            Cache = mad_utils:get_value(deps_dir, Conf, deps_fetch),
+            case Cache of
+                deps_fetch -> skip;
+                Dir -> file:make_dir(Dir) end,
+            FetchDir = mad_utils:get_value(deps_dir, Conf, ["deps"]),
+            file:make_dir(FetchDir),
+            mad_deps:fetch(Cwd, Conf, ConfigFile, Deps)
     end.
 
 %% compile dependencies and the app
@@ -61,17 +58,16 @@ compile(Cwd, ConfigFile, Conf) ->
 'compile-app'(Cwd, ConfigFile, Conf) ->
     %% check sub_dirs if they have something to be compiled
     Dirs = [mad_utils:sub_dirs(Cwd, ConfigFile, Conf)] ++ [Cwd],
-    mad_compile:foreach(fun mad_compile:app/2, Dirs, ConfigFile).
+    mad_compile:foreach(fun mad_compile:app/3, Dirs, Conf, ConfigFile).
 
 'compile-deps'(Cwd, ConfigFile, Conf) ->
-    mad_compile:deps(Cwd, ConfigFile, get_value(deps, Conf, [])).
+    mad_compile:deps(Cwd, Conf, ConfigFile, get_value(deps, Conf, [])).
 
 get_value(Key, Opts, Default) ->
     case lists:keyfind(Key, 1, Opts) of
         {Key, Value} ->
             Value;
-        _ -> Default
-    end.
+        _ -> Default end.
 
 option_spec_list() ->
     [
@@ -112,7 +108,7 @@ help() ->
     io:format("Erlang dependency manager~n"),
     Params = [
               {"", ""},
-              {"fetch-deps", "Fetches dependencies"},
+              {"get-deps", "Fetches dependencies"},
               {"compile-deps", "Compiles dependencies"},
               {"compile-app", "Compiles application"},
               {"compile", "Compiles dependencies and application"}
